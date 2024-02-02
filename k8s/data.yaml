@@ -1,0 +1,31 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-labeling
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-labeling
+  template:
+    metadata:
+      labels:
+        app: data-labeling
+    spec:
+      containers:
+        - name: main
+          image: kyrylprojector/data:latest
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-labeling
+  labels:
+    app: data-labeling
+spec:
+  ports:
+  - port: 6900
+    protocol: TCP
+  selector:
+    app: data-labeling

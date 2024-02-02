@@ -1,0 +1,5 @@
+-r requirements-data.txt
+-r requirements-experiments.txt
+-r requirements-monitoring.txt
+-r requirements-pipeline.txt
+-r requirements-serving.txt

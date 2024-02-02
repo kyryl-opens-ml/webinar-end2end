@@ -1,0 +1,52 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: serving-open-model
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: serving-open-model
+  template:
+    metadata:
+      labels:
+        app: serving-open-model
+    spec:
+      containers:
+        - name: main
+          image: ghcr.io/huggingface/text-generation-inference:latest
+          # args: ["--model-id", "google/gemma-2b", "--num-shard", "1"]
+          args: ["--model-id", "google/flan-t5-large", "--num-shard", "1"]
+          
+          ports:
+          - containerPort: 80
+          volumeMounts:
+          - name: shm
+            mountPath: /dev/shm
+          - name: data
+            mountPath: /data
+          env:
+          - name: HF_TOKEN
+            value: "hf_your_token"            
+
+      volumes:
+      - name: shm
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: data
+        emptyDir:
+          sizeLimit: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: serving-open-model
+  labels:
+    app: serving-open-model
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+  selector:
+    app: serving-open-model

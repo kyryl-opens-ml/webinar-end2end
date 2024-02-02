@@ -1,0 +1,7 @@
+torch==2.1.2
+transformers==4.37.2
+nltk==3.8.1
+peft==0.7.1
+scikit_learn==1.4.0
+ipython==8.21.0
+argilla==1.23.0

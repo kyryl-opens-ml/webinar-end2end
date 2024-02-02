@@ -1,0 +1,33 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: experiment-tracking
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: experiment-tracking
+  template:
+    metadata:
+      labels:
+        app: experiment-tracking
+    spec:
+      containers:
+        - name: main
+          image: ghcr.io/mlflow/mlflow:v2.2.1
+          command: ["mlflow"]
+          args: ["server", "--host", "0.0.0.0", "--port", "8080", "--backend-store-uri", "file:///tmp/runs"]          
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: experiment-tracking
+  labels:
+    app: experiment-tracking
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+  selector:
+    app: experiment-tracking

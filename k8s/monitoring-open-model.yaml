@@ -1,0 +1,43 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-open
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitoring-open
+  template:
+    metadata:
+      labels:
+        app: monitoring-open
+    spec:
+      containers:
+        - name: main
+          image: kyrylprojector/monitoring:latest
+          env:
+          - name: ARGILLA_URI
+            value: "http://data-labeling.default.svc.cluster.local:6900"
+          - name: ARGILLA_KEY
+            value: "adminadmin"
+          - name: ARGILLA_NAMESPACE
+            value: "admin"
+          - name: SERVING_URL
+            value: "http://serving-open-model.default.svc.cluster.local:80"
+          - name: FEEDBACK_DATASET_NAME
+            value: "workshop-feedback-open-model"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-open
+  labels:
+    app: monitoring-open
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+  selector:
+    app: monitoring-open
