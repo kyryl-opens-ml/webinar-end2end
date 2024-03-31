@@ -1,3 +1,12 @@
+# Webinar: "ML in Production" on practice
+
+![alt text](./docs/end2end.jpg)
+
+# Webinar and discord
+
+- For a video lecture explaining this code, [watch this webinar](https://edu.kyrylai.com/courses/webinar-machine-learning-in-production)
+- For support and questions, join this [Discord server](https://discord.gg/SyCg2ZQf)
+
 # Tools to install 
 
 - [docker](https://docs.docker.com/engine/install/)
