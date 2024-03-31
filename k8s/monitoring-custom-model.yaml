@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: main
-          image: kyrylprojector/monitoring:latest
+          image: ghcr.io/kyryl-opens-ml/workshop-monitoring:main
           env:
           - name: ARGILLA_URI
             value: "http://data-labeling.default.svc.cluster.local:6900"
