@@ -8,7 +8,7 @@ on:
 
 jobs:
 
-  build-and-push-data-container:
+  data-container:
     runs-on: ubuntu-latest
 
     permissions:
@@ -40,7 +40,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  build-and-push-experiments-container:
+  experiments-container:
     runs-on: ubuntu-latest
 
     permissions:
@@ -78,7 +78,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  build-and-push-pipeline-container:
+  pipeline-container:
     runs-on: ubuntu-latest
 
     permissions:
@@ -110,7 +110,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  build-and-push-monitoring-container:
+  monitoring-container:
     runs-on: ubuntu-latest
 
     permissions:
