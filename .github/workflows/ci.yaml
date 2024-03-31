@@ -4,108 +4,140 @@ on:
   push:
     branches:
       - main
-      - dev
+      - migrate-to-github-registry-for-docker-images
 
 jobs:
 
-  data_container:
+  build-and-push-data-container:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+    
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
         with:
-          username: ${{ secrets.DOCKER_HUB_USER }}
-          password: ${{ secrets.DOCKER_HUB_PASS }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+    
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ghcr.io/kyryl-opens-ml/workshop-data
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Build and push Docker image
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .
           push: true
-          tags: kyrylprojector/data:latest
           target: data
-          cache-from: type=registry,ref=kyrylprojector/data:buildcache
-          cache-to: type=registry,ref=kyrylprojector/data:buildcache,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # data_container:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     - name: Login to Docker Hub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: ${{ secrets.DOCKER_HUB_USER }}
+  #         password: ${{ secrets.DOCKER_HUB_PASS }}
+
+  #     - name: Build and push
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: kyrylprojector/data:latest
+  #         target: data
+  #         cache-from: type=registry,ref=kyrylprojector/data:buildcache
+  #         cache-to: type=registry,ref=kyrylprojector/data:buildcache,mode=max
 
 
-  experiments_container:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # experiments_container:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USER }}
-          password: ${{ secrets.DOCKER_HUB_PASS }}
+  #     - name: Login to Docker Hub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: ${{ secrets.DOCKER_HUB_USER }}
+  #         password: ${{ secrets.DOCKER_HUB_PASS }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: kyrylprojector/experiments:latest
-          target: experiments
-          cache-from: type=registry,ref=kyrylprojector/experiments:buildcache
-          cache-to: type=registry,ref=kyrylprojector/experiments:buildcache,mode=max
+  #     - name: Build and push
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: kyrylprojector/experiments:latest
+  #         target: experiments
+  #         cache-from: type=registry,ref=kyrylprojector/experiments:buildcache
+  #         cache-to: type=registry,ref=kyrylprojector/experiments:buildcache,mode=max
 
 
-  pipeline_container:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # pipeline_container:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USER }}
-          password: ${{ secrets.DOCKER_HUB_PASS }}
+  #     - name: Login to Docker Hub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: ${{ secrets.DOCKER_HUB_USER }}
+  #         password: ${{ secrets.DOCKER_HUB_PASS }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: kyrylprojector/pipeline:latest
-          target: pipeline
-          cache-from: type=registry,ref=kyrylprojector/pipeline:buildcache
-          cache-to: type=registry,ref=kyrylprojector/pipeline:buildcache,mode=max
+  #     - name: Build and push
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: kyrylprojector/pipeline:latest
+  #         target: pipeline
+  #         cache-from: type=registry,ref=kyrylprojector/pipeline:buildcache
+  #         cache-to: type=registry,ref=kyrylprojector/pipeline:buildcache,mode=max
 
-  monitoring_container:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # monitoring_container:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USER }}
-          password: ${{ secrets.DOCKER_HUB_PASS }}
+  #     - name: Login to Docker Hub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: ${{ secrets.DOCKER_HUB_USER }}
+  #         password: ${{ secrets.DOCKER_HUB_PASS }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: kyrylprojector/monitoring:latest
-          target: monitoring
-          cache-from: type=registry,ref=kyrylprojector/monitoring:buildcache
-          cache-to: type=registry,ref=kyrylprojector/monitoring:buildcache,mode=max
+  #     - name: Build and push
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: kyrylprojector/monitoring:latest
+  #         target: monitoring
+  #         cache-from: type=registry,ref=kyrylprojector/monitoring:buildcache
+  #         cache-to: type=registry,ref=kyrylprojector/monitoring:buildcache,mode=max
