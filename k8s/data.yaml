@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: main
-          image: kyrylprojector/data:latest
+          image: ghcr.io/kyryl-opens-ml/workshop-data:main
 ---
 apiVersion: v1
 kind: Service
