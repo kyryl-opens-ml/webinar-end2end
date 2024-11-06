@@ -1,8 +1,8 @@
-# Webinar: "ML in Production" on practice
+# Workshop: "ML in Production" on practice
 
 ![alt text](./docs/end2end.jpg)
 
-# Webinar and discord
+# Workshop and discord
 
 - For a video lecture explaining this code, [watch this webinar](https://edu.kyrylai.com/courses/webinar-machine-learning-in-production)
 - For support and questions, join this [Discord server](https://discord.gg/RNjfNrrN)
