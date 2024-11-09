@@ -10,7 +10,9 @@ from tqdm import tqdm
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
     ARGILLA_URI: str
     ARGILLA_KEY: str
     ARGILLA_NAMESPACE: str
@@ -28,10 +30,18 @@ def load_text_to_sql_dataset() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
     print("Split to train & test")
     df = dataset["train"].to_pandas()
-    df = df.rename(columns={"answer": "sql_query", "context": "sql_schema", "question": "user_query"})
+    df = df.rename(
+        columns={
+            "answer": "sql_query",
+            "context": "sql_schema",
+            "question": "user_query",
+        }
+    )
 
     df_train, df_val = train_test_split(df, test_size=0.1, random_state=42)
-    print(f"Train size {df_train.shape} {df_train.columns}, Validation size {df_val.shape} {df_val.columns}")
+    print(
+        f"Train size {df_train.shape} {df_train.columns}, Validation size {df_val.shape} {df_val.columns}"
+    )
 
     return df_train, df_val
 
@@ -57,7 +67,9 @@ def _upload_from_pandas(df: pd.DataFrame, dataset_name: str) -> str:
                 required=False,
                 use_markdown=True,
             ),
-            rg.LabelQuestion(name="correct", title="Is sample correct", labels=["true", "false"]),
+            rg.LabelQuestion(
+                name="correct", title="Is sample correct", labels=["true", "false"]
+            ),
         ],
     )
 

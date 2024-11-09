@@ -20,18 +20,21 @@ RUN pip install -r requirements-data.txt
 COPY . .
 
 
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-devel as experiments
+ARG DEBIAN_FRONTEND=noninteractive
 
-FROM huggingface/transformers-pytorch-gpu:4.35.2 as experiments
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ffmpeg \
+    git \
+    git-lfs
 
-WORKDIR /app
-
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
+RUN pip install --upgrade pip
 COPY requirements-experiments.txt requirements-experiments.txt
 RUN pip install -r requirements-experiments.txt
 
-
 COPY . .
+
 
 
 FROM experiments as pipeline
