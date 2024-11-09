@@ -37,6 +37,7 @@ training_config = {
     "gradient_checkpointing_kwargs":{"use_reentrant": False},
     "gradient_accumulation_steps": 1,
     "warmup_ratio": 0.2,
+    "report_to": [None],
     }
 
 peft_config = {
@@ -80,7 +81,8 @@ logger.info(f"PEFT parameters {peft_conf}")
 # Model Loading
 ################
 
-checkpoint_path = "meta-llama/Llama-3.2-1B"
+# checkpoint_path = "microsoft/Phi-3.5-mini-instruct"
+checkpoint_path = "meta-llama/Llama-3.2-1B-Instruct"
 model_kwargs = dict(
     use_cache=False,
     trust_remote_code=True,
@@ -99,18 +101,27 @@ tokenizer.padding_side = 'right'
 ##################
 # Data Processing
 ##################
+
 def apply_chat_template(
     example,
     tokenizer,
 ):
-    messages = example["messages"]
+    
+    messages = []
+    user = {"content": f"{example['context']}\n Input: {example['question']}", "role": "user"}
+    assistant = {"content": f"{example['answer']}", "role": "assistant"}
+
+    messages = [user, assistant]
     example["text"] = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=False)
     return example
 
-raw_dataset = load_dataset("b-mc2/sql-create-context")
-train_dataset = raw_dataset["train_sft"]
-test_dataset = raw_dataset["test_sft"]
+dataset_name = "b-mc2/sql-create-context"
+raw_dataset = load_dataset(dataset_name, split="train")
+raw_datasets = raw_dataset.train_test_split(test_size=0.05, seed=42)
+
+train_dataset = raw_datasets["train"]
+test_dataset = raw_datasets["test"]
 column_names = list(train_dataset.features)
 
 processed_train_dataset = train_dataset.map(
