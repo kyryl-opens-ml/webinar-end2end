@@ -1,4 +1,48 @@
+import json
+import logging
 from dataclasses import dataclass
+from pathlib import Path
+
+import evaluate
+import torch
+from datasets import Dataset
+from peft import AutoPeftModelForCausalLM
+from tqdm import tqdm
+from transformers import AutoTokenizer, pipeline
+from random import randrange
+
+from datasets import DatasetDict, load_dataset
+
+import logging
+from functools import partial
+from pathlib import Path
+
+import torch
+from datasets import DatasetDict
+from peft import LoraConfig, TaskType
+from transformers import (
+    AutoModelForCausalLM,
+    HfArgumentParser,
+    TrainingArguments,
+    set_seed,
+)
+from trl import SFTTrainer
+
+
+import logging
+import sys
+from pathlib import Path
+
+import datasets
+import transformers
+import wandb
+
+import typer
+
+
+
+logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -15,10 +59,6 @@ class ModelArguments:
     lora_dropout: float
 
 
-from pathlib import Path
-from random import randrange
-
-from datasets import DatasetDict, load_dataset
 
 
 def _get_sql_data(random_state: int = 42, subsample: float = None) -> DatasetDict:
@@ -37,7 +77,8 @@ def _get_sql_data(random_state: int = 42, subsample: float = None) -> DatasetDic
     return datasets
 
 
-def load_sql_data(path_to_save: Path, subsample: float = None):
+def load_sql_data(path_to_save: Path | str, subsample: float = None):
+    path_to_save = Path(path_to_save)
     path_to_save.mkdir(parents=True, exist_ok=True)
 
     datasets = _get_sql_data(subsample=subsample)
@@ -46,37 +87,13 @@ def load_sql_data(path_to_save: Path, subsample: float = None):
     datasets["test"].to_json(path_to_save / "test.json")
 
 
-def load_sql_data_file_input(
-    path_to_train: Path, path_to_test: Path, subsample: float = None
-):
-    path_to_train.parent.mkdir(parents=True, exist_ok=True)
-    path_to_test.parent.mkdir(parents=True, exist_ok=True)
-
-    datasets = _get_sql_data(subsample=subsample)
-
-    datasets["train"].to_json(path_to_train)
-    datasets["test"].to_json(path_to_test)
-
-import json
-import logging
-from pathlib import Path
-
-import evaluate
-import torch
-from datasets import Dataset
-from peft import AutoPeftModelForCausalLM
-from tqdm import tqdm
-from transformers import AutoTokenizer, pipeline
-
-logger = logging.getLogger()
-
 
 class Predictor:
     def __init__(self, model_load_path: str):
         device_map = {"": 0}
         new_model = AutoPeftModelForCausalLM.from_pretrained(
             model_load_path,
-            low_cpu_mem_usage=True,
+            # low_cpu_mem_usage=True,
             return_dict=True,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
@@ -113,21 +130,6 @@ class Predictor:
         return sql
 
 
-def run_inference_on_json(json_path: Path, model_load_path: Path, result_path: Path):
-    df = Dataset.from_json(str(json_path)).to_pandas()
-    model = Predictor(model_load_path=model_load_path)
-
-    generated_sql = []
-    for idx in tqdm(range(len(df))):
-        context = df.iloc[idx]["context"]
-        question = df.iloc[idx]["question"]
-
-        sql = model.predict(question=question, context=context)
-        generated_sql.append(sql)
-    df["generated_sql"] = generated_sql
-    df.to_csv(result_path, index=False)
-
-
 def run_evaluate_on_json(json_path: Path, model_load_path: Path, result_path: Path):
     df = Dataset.from_json(str(json_path)).to_pandas()
     model = Predictor(model_load_path=model_load_path)
@@ -146,27 +148,6 @@ def run_evaluate_on_json(json_path: Path, model_load_path: Path, result_path: Pa
     print(f"Metrics {results}")
     with open(result_path, "w") as f:
         json.dump(results, f)
-
-import logging
-from functools import partial
-from pathlib import Path
-
-import torch
-from datasets import Dataset, DatasetDict
-from peft import LoraConfig, TaskType
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    HfArgumentParser,
-    TrainingArguments,
-    set_seed,
-)
-from trl import SFTTrainer
-
-from generative_example.config import DataTrainingArguments, ModelArguments
-from generative_example.utils import setup_logger
-
-logger = logging.getLogger(__name__)
 
 
 def create_message_column(row):
@@ -206,17 +187,19 @@ def process_dataset(model_id: str, train_file: str, test_file: str) -> DatasetDi
 
 
 def get_model(model_id: str, device_map):
-    if torch.cuda.is_bf16_supported():
-        compute_dtype = torch.bfloat16
-        attn_implementation = "flash_attention_2"
-        # If bfloat16 is not supported, 'compute_dtype' is set to 'torch.float16' and 'attn_implementation' is set to 'sdpa'.
-    else:
-        compute_dtype = torch.float16
-        attn_implementation = "sdpa"
+    # if torch.cuda.is_bf16_supported():
+    #     compute_dtype = torch.bfloat16
+    #     attn_implementation = "flash_attention_2"
+    #     # If bfloat16 is not supported, 'compute_dtype' is set to 'torch.float16' and 'attn_implementation' is set to 'sdpa'.
+    # else:
+    #     compute_dtype = torch.float16
+    #     attn_implementation = "sdpa"
 
-        # This line of code is used to print the value of 'attn_implementation', which indicates the chosen attention implementation.
-        print(attn_implementation)
+    #     # This line of code is used to print the value of 'attn_implementation', which indicates the chosen attention implementation.
+    #     print(attn_implementation)
 
+    compute_dtype = torch.bfloat16
+    attn_implementation = "flash_attention_2"
     tokenizer = AutoTokenizer.from_pretrained(
         model_id, trust_remote_code=True, add_eos_token=True, use_fast=True
     )
@@ -234,18 +217,16 @@ def get_model(model_id: str, device_map):
     return tokenizer, model
 
 
-def get_config(config_path: Path):
-    parser = HfArgumentParser(
-        (ModelArguments, DataTrainingArguments, TrainingArguments)
-    )
-    model_args, data_args, training_args = parser.parse_json_file(config_path)
+def get_config(config_dict: dict):
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    model_args, data_args, training_args = parser.parse_dict(config_dict)
     return model_args, data_args, training_args
 
 
-def train(config_path: Path):
+def train(config_dict: Path):
     setup_logger(logger)
 
-    model_args, data_args, training_args = get_config(config_path=config_path)
+    model_args, data_args, training_args = get_config(config_dict=config_dict)
 
     logger.info(f"model_args = {model_args}")
     logger.info(f"data_args = {data_args}")
@@ -296,13 +277,6 @@ def train(config_path: Path):
     trainer.create_model_card()
 
 
-import logging
-import sys
-from pathlib import Path
-
-import datasets
-import transformers
-import wandb
 
 
 def setup_logger(logger):
@@ -341,18 +315,59 @@ def load_from_registry(model_name: str, model_path: Path):
         print(f"{artifact_dir}")
 
 
-import typer
+def end2end_training_eval():
+    path_to_save = "./data/"
+    load_sql_data(path_to_save=path_to_save)
 
 
-app = typer.Typer()
-app.command()(load_sql_data)
-app.command()(load_sql_data_file_input)
-app.command()(train)
-app.command()(upload_to_registry)
-app.command()(load_from_registry)
-app.command()(run_inference_on_json)
-app.command()(run_evaluate_on_json)
+    config = json.loads("""
+            {
+            "train_file": "./data/train.json",
+            "test_file": "./data/test.json",
+
+            "model_id": "microsoft/Phi-3-mini-4k-instruct",
+            "lora_r": 16,
+            "lora_alpha": 16,
+            "lora_dropout": 0.05,
+
+
+            "output_dir": "./phi-3-mini-lora-text2sql",
+            "eval_strategy": "steps",
+            "do_eval": true,
+            "optim": "adamw_torch",
+            "per_device_train_batch_size": 8,
+            "per_device_eval_batch_size": 8,
+            "gradient_accumulation_steps": 4,
+            "learning_rate": 0.0001,
+            "num_train_epochs": 1,
+            "warmup_ratio": 0.1,
+            "logging_first_step": true,
+            "logging_steps": 500,
+            "save_steps": 500,
+            "seed": 42,
+            "bf16": true,
+            "fp16": false,
+            "eval_steps": 500,
+            "report_to": ["none"],
+            "lr_scheduler_type": "linear",
+            "log_level" : "debug",
+            "evaluation_strategy": "steps",
+            "eval_on_start": true
+            }
+    """)
+    train(config_dict=config)
+
+    # run_evaluate_on_json(json_path=config['test_file'], 
+    #                      model_load_path=config['output_dir'], 
+    #                      result_path='metrics.json')
+
+# app = typer.Typer()
+# app.command()(load_sql_data)
+# app.command()(train)
+# app.command()(upload_to_registry)
+# app.command()(load_from_registry)
+# app.command()(run_evaluate_on_json)
 
 
 if __name__ == "__main__":
-    app()
+    end2end_training_eval()
