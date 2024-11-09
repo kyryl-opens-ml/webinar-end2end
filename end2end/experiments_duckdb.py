@@ -80,7 +80,7 @@ logger.info(f"PEFT parameters {peft_conf}")
 # Model Loading
 ################
 
-checkpoint_path = "microsoft/Phi-3.5-mini-instruct"
+checkpoint_path = "meta-llama/Llama-3.2-1B"
 model_kwargs = dict(
     use_cache=False,
     trust_remote_code=True,
