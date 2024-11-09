@@ -30,6 +30,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
+      # See explanation: https://github.com/orgs/community/discussions/25678 
+      - name: Clean disk
+        run: |
+          rm -rf /opt/hostedtoolcache
+                
 
       - name: Build and push experiments with cache
         uses: docker/build-push-action@v6
