@@ -20,6 +20,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -29,11 +31,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       
 
-      - name: Build and push experiments
+      - name: Build and push experiments with cache
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           target: experiments
           tags: ghcr.io/kyryl-opens-ml/workshop-experiments:latest
-
+          cache-from: type=registry,ref=ghcr.io/kyryl-opens-ml/workshop-experiments:buildcache
+          cache-to: type=registry,ref=ghcr.io/kyryl-opens-ml/workshop-experiments:buildcache,mode=max
