@@ -1,220 +1,358 @@
-from dataclasses import dataclass, field
-from typing import Dict, Tuple
-
-import argilla as rg
-import evaluate
-import numpy as np
-import pandas as pd
-import torch
-from datasets import Dataset, concatenate_datasets, load_dataset
-from peft import LoraConfig, TaskType, get_peft_model
-from sklearn.model_selection import train_test_split
-from tqdm import tqdm
-from transformers import (
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-    DataCollatorForSeq2Seq,
-    HfArgumentParser,
-    Seq2SeqTrainer,
-    Seq2SeqTrainingArguments,
-)
-
-
-def get_argilla_dataset_formatted(dataset_name_full: str, api_url: str, api_key: str, workspace: str) -> Dataset:
-    rg.init(api_url=api_url, api_key=api_key, workspace=workspace)
-
-    remote_dataset = rg.FeedbackDataset.from_argilla(dataset_name_full)
-    local_dataset = remote_dataset.pull()
-    df = local_dataset.format_as("datasets").to_pandas()
-    prompt = "### SQL schema: {sql_schema} ### User query: {user_query} ### SQL query:"
-
-    format_data = []
-    for idx in range(df.shape[0]):
-        sample = df.iloc[idx]
-        format_data.append(
-            {
-                "input_text": prompt.format(sql_schema=sample["sql_schema"], user_query=sample["user_query"]),
-                "output_text": sample["sql_query"],
-            }
-        )
-    dataset = Dataset.from_pandas(pd.DataFrame(format_data))
-    return dataset
-
-
-def get_dataset_argilla(dataset_name: str, api_url: str, api_key: str, workspace: str) -> Dict[str, Dataset]:
-
-    dataset_train = get_argilla_dataset_formatted(
-        dataset_name_full=f"{dataset_name}-train", api_url=api_url, api_key=api_key, workspace=workspace
-    )
-    dataset_val = get_argilla_dataset_formatted(
-        dataset_name_full=f"{dataset_name}-val", api_url=api_url, api_key=api_key, workspace=workspace
-    )
-
-    return {"train": dataset_train, "test": dataset_val}
-
-
-def get_max_len(dataset, tokenizer) -> Tuple[int, int]:
-    tokenized_inputs = concatenate_datasets([dataset["train"], dataset["test"]]).map(
-        lambda x: tokenizer(x["input_text"], truncation=True),
-        batched=True,
-        remove_columns=["input_text", "output_text"],
-    )
-    input_lenghts = [len(x) for x in tokenized_inputs["input_ids"]]
-    max_source_lengths = int(np.percentile(input_lenghts, 95))
-
-    tokenized_targets = concatenate_datasets([dataset["train"], dataset["test"]]).map(
-        lambda x: tokenizer(x["output_text"], truncation=True),
-        batched=True,
-        remove_columns=["input_text", "output_text"],
-    )
-    target_lenghts = [len(x) for x in tokenized_targets["input_ids"]]
-    max_target_lengths = int(np.percentile(target_lenghts, 95))
-
-    return max_source_lengths, max_target_lengths
+from dataclasses import dataclass
 
 
 @dataclass
-class ScriptArguments:
-    model_name: str = field(default="google/flan-t5-small", metadata={"help": "the model name"})
-
-    dataset_name: str = field(default="text2sql-small", metadata={"help": "the dataset name"})
-    api_url: str = field(default="http://3.80.58.157:6900", metadata={"help": "argilla url"})
-    api_key: str = field(default="adminadmin", metadata={"help": "argilla key"})
-    workspace: str = field(default="admin", metadata={"help": "argilla workspace"})
+class DataTrainingArguments:
+    train_file: str
+    test_file: str
 
 
-def get_model(model_name: str) -> AutoModelForSeq2SeqLM:
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="auto")
-
-    # Define LoRA Config
-    lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules=["q", "v"],
-        lora_dropout=0.2,
-        bias="none",
-        task_type=TaskType.SEQ_2_SEQ_LM,
-    )
-
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-    return model
+@dataclass
+class ModelArguments:
+    model_id: str
+    lora_r: int
+    lora_alpha: int
+    lora_dropout: float
 
 
-@torch.inference_mode()
-def eval_model(test_data: Dataset, model_name: str):
+from pathlib import Path
+from random import randrange
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, device_map="cuda:0")
-
-    predictions = []
-
-    for idx in tqdm(range(len(test_data))):
-
-        input_text = "Generate SQL query based on next information: " + test_data[idx]["input_text"]
-        input_ids = tokenizer(input_text, return_tensors="pt").to("cuda:0")
-        outputs = model.generate(**input_ids, max_length=100)
-        prediction = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        predictions.append(prediction)
-
-    metric = evaluate.load("rouge")
-    references = test_data["output_text"]
-    rogue = metric.compute(predictions=predictions, references=references, use_stemmer=True)
-    print(f"rogue = {rogue}")
-    return rogue
+from datasets import DatasetDict, load_dataset
 
 
-def train_model(dataset, tokenizer, model, training_args, script_args):
-    max_source_lengths, max_target_lengths = get_max_len(dataset=dataset, tokenizer=tokenizer)
-    print(f"Max source lengths: {max_source_lengths}")
-    print(f"Max target lengths: {max_target_lengths}")
+def _get_sql_data(random_state: int = 42, subsample: float = None) -> DatasetDict:
+    dataset_name = "b-mc2/sql-create-context"
+    dataset = load_dataset(dataset_name, split="train")
+    print(f"dataset size: {len(dataset)}")
+    print(dataset[randrange(len(dataset))])
 
-    def preprocess_function(sample, padding="max_length"):
-        # add prefix to the input for t5
-        inputs = [item for item in sample["input_text"]]
-        # tokenize inputs
-        model_inputs = tokenizer(inputs, max_length=max_source_lengths, padding=padding, truncation=True)
-        # Tokenize targets with the `text_target` keyword argument
-        labels = tokenizer(
-            text_target=sample["output_text"],
-            max_length=max_target_lengths,
-            padding=padding,
-            truncation=True,
+    if subsample is not None:
+        dataset = dataset.shuffle(seed=random_state).select(
+            range(int(len(dataset) * subsample))
         )
-        # If we are padding here, replace all tokenizer.pad_token_id in the labels by -100 when we want to ignore
-        # padding in the loss.
-        if padding == "max_length":
-            labels["input_ids"] = [
-                [(l if l != tokenizer.pad_token_id else -100) for l in label] for label in labels["input_ids"]
-            ]
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
+        print(f"dataset new size: {len(dataset)}")
 
-    tokenized_dataset = {}
-    tokenized_dataset["train"] = dataset["train"].map(
-        preprocess_function, batched=True, remove_columns=["input_text", "output_text"]
-    )
-    tokenized_dataset["test"] = dataset["test"].map(
-        preprocess_function, batched=True, remove_columns=["input_text", "output_text"]
-    )
-    print(f"Keys of tokenized dataset: {list(tokenized_dataset['train'].features)}")
+    datasets = dataset.train_test_split(test_size=0.05, seed=random_state)
+    return datasets
 
-    # we want to ignore tokenizer pad token in the loss
-    label_pad_token_id = -100
-    # Data collator
-    data_collator = DataCollatorForSeq2Seq(
-        tokenizer,
+
+def load_sql_data(path_to_save: Path, subsample: float = None):
+    path_to_save.mkdir(parents=True, exist_ok=True)
+
+    datasets = _get_sql_data(subsample=subsample)
+
+    datasets["train"].to_json(path_to_save / "train.json")
+    datasets["test"].to_json(path_to_save / "test.json")
+
+
+def load_sql_data_file_input(
+    path_to_train: Path, path_to_test: Path, subsample: float = None
+):
+    path_to_train.parent.mkdir(parents=True, exist_ok=True)
+    path_to_test.parent.mkdir(parents=True, exist_ok=True)
+
+    datasets = _get_sql_data(subsample=subsample)
+
+    datasets["train"].to_json(path_to_train)
+    datasets["test"].to_json(path_to_test)
+
+import json
+import logging
+from pathlib import Path
+
+import evaluate
+import torch
+from datasets import Dataset
+from peft import AutoPeftModelForCausalLM
+from tqdm import tqdm
+from transformers import AutoTokenizer, pipeline
+
+logger = logging.getLogger()
+
+
+class Predictor:
+    def __init__(self, model_load_path: str):
+        device_map = {"": 0}
+        new_model = AutoPeftModelForCausalLM.from_pretrained(
+            model_load_path,
+            low_cpu_mem_usage=True,
+            return_dict=True,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+            device_map=device_map,
+        )
+        merged_model = new_model.merge_and_unload()
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_load_path, trust_remote_code=True
+        )
+        pipe = pipeline("text-generation", model=merged_model, tokenizer=tokenizer)
+        self.pipe = pipe
+
+    @torch.no_grad()
+    def predict(self, question: str, context: str) -> str:
+        pipe = self.pipe
+
+        messages = [{"content": f"{context}\n Input: {question}", "role": "user"}]
+
+        prompt = pipe.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        outputs = pipe(
+            prompt,
+            max_new_tokens=256,
+            do_sample=True,
+            num_beams=1,
+            temperature=0.3,
+            top_k=50,
+            top_p=0.95,
+            max_time=180,
+        )
+        sql = outputs[0]["generated_text"][len(prompt) :].strip()
+        return sql
+
+
+def run_inference_on_json(json_path: Path, model_load_path: Path, result_path: Path):
+    df = Dataset.from_json(str(json_path)).to_pandas()
+    model = Predictor(model_load_path=model_load_path)
+
+    generated_sql = []
+    for idx in tqdm(range(len(df))):
+        context = df.iloc[idx]["context"]
+        question = df.iloc[idx]["question"]
+
+        sql = model.predict(question=question, context=context)
+        generated_sql.append(sql)
+    df["generated_sql"] = generated_sql
+    df.to_csv(result_path, index=False)
+
+
+def run_evaluate_on_json(json_path: Path, model_load_path: Path, result_path: Path):
+    df = Dataset.from_json(str(json_path)).to_pandas()
+    model = Predictor(model_load_path=model_load_path)
+
+    generated_sql = []
+    for idx in tqdm(range(len(df))):
+        context = df.iloc[idx]["context"]
+        question = df.iloc[idx]["question"]
+
+        sql = model.predict(question=question, context=context)
+        generated_sql.append(sql)
+
+    gt_sql = df["answer"].values
+    rouge = evaluate.load("rouge")
+    results = rouge.compute(predictions=generated_sql, references=gt_sql)
+    print(f"Metrics {results}")
+    with open(result_path, "w") as f:
+        json.dump(results, f)
+
+import logging
+from functools import partial
+from pathlib import Path
+
+import torch
+from datasets import Dataset, DatasetDict
+from peft import LoraConfig, TaskType
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    HfArgumentParser,
+    TrainingArguments,
+    set_seed,
+)
+from trl import SFTTrainer
+
+from generative_example.config import DataTrainingArguments, ModelArguments
+from generative_example.utils import setup_logger
+
+logger = logging.getLogger(__name__)
+
+
+def create_message_column(row):
+    messages = []
+    user = {"content": f"{row['context']}\n Input: {row['question']}", "role": "user"}
+    messages.append(user)
+    assistant = {"content": f"{row['answer']}", "role": "assistant"}
+    messages.append(assistant)
+    return {"messages": messages}
+
+
+def format_dataset_chatml(row, tokenizer):
+    return {
+        "text": tokenizer.apply_chat_template(
+            row["messages"], add_generation_prompt=False, tokenize=False
+        )
+    }
+
+
+def process_dataset(model_id: str, train_file: str, test_file: str) -> DatasetDict:
+    dataset = DatasetDict(
+        {
+            "train": Dataset.from_json(train_file),
+            "test": Dataset.from_json(test_file),
+        }
+    )
+
+    tokenizer_id = model_id
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
+    tokenizer.padding_side = "right"
+
+    dataset_chatml = dataset.map(create_message_column)
+    dataset_chatml = dataset_chatml.map(
+        partial(format_dataset_chatml, tokenizer=tokenizer)
+    )
+    return dataset_chatml
+
+
+def get_model(model_id: str, device_map):
+    if torch.cuda.is_bf16_supported():
+        compute_dtype = torch.bfloat16
+        attn_implementation = "flash_attention_2"
+        # If bfloat16 is not supported, 'compute_dtype' is set to 'torch.float16' and 'attn_implementation' is set to 'sdpa'.
+    else:
+        compute_dtype = torch.float16
+        attn_implementation = "sdpa"
+
+        # This line of code is used to print the value of 'attn_implementation', which indicates the chosen attention implementation.
+        print(attn_implementation)
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id, trust_remote_code=True, add_eos_token=True, use_fast=True
+    )
+    tokenizer.pad_token = tokenizer.unk_token
+    tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
+    tokenizer.padding_side = "left"
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=compute_dtype,
+        trust_remote_code=True,
+        device_map=device_map,
+        attn_implementation=attn_implementation,
+    )
+    return tokenizer, model
+
+
+def get_config(config_path: Path):
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments)
+    )
+    model_args, data_args, training_args = parser.parse_json_file(config_path)
+    return model_args, data_args, training_args
+
+
+def train(config_path: Path):
+    setup_logger(logger)
+
+    model_args, data_args, training_args = get_config(config_path=config_path)
+
+    logger.info(f"model_args = {model_args}")
+    logger.info(f"data_args = {data_args}")
+    logger.info(f"training_args = {training_args}")
+
+    device_map = {"": 0}
+    target_modules = [
+        "k_proj",
+        "q_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "down_proj",
+        "up_proj",
+    ]
+
+    set_seed(training_args.seed)
+
+    dataset_chatml = process_dataset(
+        model_id=model_args.model_id,
+        train_file=data_args.train_file,
+        test_file=data_args.test_file,
+    )
+    logger.info(dataset_chatml["train"][0])
+
+    tokenizer, model = get_model(model_id=model_args.model_id, device_map=device_map)
+    peft_config = LoraConfig(
+        r=model_args.lora_r,
+        lora_alpha=model_args.lora_alpha,
+        lora_dropout=model_args.lora_dropout,
+        task_type=TaskType.CAUSAL_LM,
+        target_modules=target_modules,
+    )
+
+    trainer = SFTTrainer(
         model=model,
-        label_pad_token_id=label_pad_token_id,
-        pad_to_multiple_of=8,
-    )
-
-    # Create Trainer instance
-    trainer = Seq2SeqTrainer(
-        model=model,
+        train_dataset=dataset_chatml["train"],
+        eval_dataset=dataset_chatml["test"],
+        peft_config=peft_config,
+        dataset_text_field="text",
+        max_seq_length=512,
         tokenizer=tokenizer,
         args=training_args,
-        data_collator=data_collator,
-        train_dataset=tokenized_dataset["train"],
-        eval_dataset=tokenized_dataset["test"],
     )
-    # silence the warnings. Please re-enable for inference!
-    model.config.use_cache = False
 
-    train_result = trainer.train()
+    trainer.train()
     trainer.save_model()
-
-    metrics = train_result.metrics
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
-    trainer.save_state()
-
-    metrics = trainer.evaluate(metric_key_prefix="eval")
-    trainer.log_metrics("eval", metrics)
-    trainer.save_metrics("eval", metrics)
-
-    kwargs = {"finetuned_from": script_args.model_name, "tasks": "text2sql"}
-    trainer.push_to_hub(**kwargs)
+    trainer.create_model_card()
 
 
-def main():
-    parser = HfArgumentParser((ScriptArguments, Seq2SeqTrainingArguments))
-    script_args, training_args = parser.parse_args_into_dataclasses()
-    dataset = get_dataset_argilla(
-        dataset_name=script_args.dataset_name,
-        api_url=script_args.api_url,
-        api_key=script_args.api_key,
-        workspace=script_args.workspace,
+import logging
+import sys
+from pathlib import Path
+
+import datasets
+import transformers
+import wandb
+
+
+def setup_logger(logger):
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
-    print(f"Train dataset size: {len(dataset['train'])}")
-    print(f"Test dataset size: {len(dataset['test'])}")
-    print(f"training_args = {training_args}")
 
-    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name)
-    model = get_model(model_name=script_args.model_name)
-    train_model(dataset=dataset, tokenizer=tokenizer, model=model, training_args=training_args, script_args=script_args)
-    eval_model(test_data=dataset["test"].select(list(range(100))), model_name=training_args.output_dir)
+    log_level = "INFO"
+    logger.setLevel(log_level)
+    datasets.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.enable_default_handler()
+    transformers.utils.logging.enable_explicit_format()
+
+
+def upload_to_registry(model_name: str, model_path: Path):
+    with wandb.init() as _:
+        art = wandb.Artifact(model_name, type="model")
+        art.add_file(model_path / "README.md")
+        art.add_file(model_path / "adapter_config.json")
+        art.add_file(model_path / "adapter_model.safetensors")
+        art.add_file(model_path / "special_tokens_map.json")
+        art.add_file(model_path / "tokenizer.json")
+        art.add_file(model_path / "tokenizer_config.json")
+        art.add_file(model_path / "training_args.bin")
+        wandb.log_artifact(art)
+
+
+def load_from_registry(model_name: str, model_path: Path):
+    with wandb.init() as run:
+        artifact = run.use_artifact(model_name, type="model")
+        artifact_dir = artifact.download(root=model_path)
+        print(f"{artifact_dir}")
+
+
+import typer
+
+
+app = typer.Typer()
+app.command()(load_sql_data)
+app.command()(load_sql_data_file_input)
+app.command()(train)
+app.command()(upload_to_registry)
+app.command()(load_from_registry)
+app.command()(run_inference_on_json)
+app.command()(run_evaluate_on_json)
 
 
 if __name__ == "__main__":
-    main()
+    app()
